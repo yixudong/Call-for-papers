@@ -199,21 +199,13 @@ class MDPIScraper(BaseScraper):
         for slug in self.JOURNALS:
             # ----- 1) JSON Special-Issue endpoint -----
             r = _get(self.JSON_API.format(slug=slug))
-            if r and r.headers.get("Content-Type", "").startswith("application/json"):
-                try:
-                    for it in r.json().get("specialIssues", []):
-                        yield CFP(
-                            provider=self.provider,
-                            journal=slug.capitalize(),       # 展示时再首字母大写
-                            title=it["title"],
-                            description=it["description"][:200],
-                            posted=None,
-                            deadline=_parse_date(it.get("deadline")),
-                            link=it["url"],
-                        )
-                    continue
-                except (ValueError, KeyError):
-                    self._warn(f"{slug} bad JSON")
+            if r:
+    try:
+        for it in r.json().get("specialIssues", []):
+            ...
+        continue
+    except (ValueError, KeyError):
+        self._warn(f"{j} bad JSON; fallback to RSS")
             # ----- 2) RSS fallback (过滤 “special issue”) -----
             feed = feedparser.parse(self.RSS.format(slug=slug))
             for e in feed.entries:
