@@ -66,9 +66,7 @@ class CFP:
 ###############################################################################
 _REQUEST_DELAY = 1.0
 _SESSION = requests.Session()
-_DEADLINE_PATTERN = re.compile(
-    r"\b(\d{1,2})\s?(January|February|March|April|May|June|July|August|September|October|November|December)\s?(\d{4})\b"
-)
+_DEADLINE_PATTERN = re.compile(r"\b(\d{1,2})\s?(January|February|March|April|May|June|July|August|September|October|November|December)\s?(\d{4})\b")
 _MONTHS = "January February March April May June July August September October November December".split()
 _MONTH_MAP = {m: i for i, m in enumerate(["", *_MONTHS])}
 _SCIMAGO_API = "https://www.scimagojr.com/journalrank.php?out=json&search={q}"
@@ -85,7 +83,7 @@ def _get(url: str) -> Optional[requests.Response]:
     """HTTP GET with retry/SSL fallback"""
     time.sleep(_REQUEST_DELAY)
     try:
-        r = _SESSION.get(url, timeout=20, headers={"User-Agent": "CFPBot/1.0"})
+        r = _SESSION.get(url, timeout=20, headers={"User-Agent": "CFPBot/1.1"})
         r.raise_for_status()
         return r
     except SSLError:
@@ -184,42 +182,50 @@ class Wileyscraper(BaseScraper):
             self._warn("bad JSON structure")
 
 ###############################################################################
-# MDPI – fallback to RSS                                                     #
+# MDPI – JSON API first, RSS fallback                                         #
 ###############################################################################
 class MDPIScraper(BaseScraper):
     provider = "MDPI"
     JOURNALS = [
         "mathematics", "ecologies", "ijerph", "materials", "ijfs",
         "sensors", "risks", "molecules", "geometry", "plants", "cells"
-    ]
+    ]  # slugs (lowercase)
     JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&limit=300"
-    RSS = "https://www.mdpi.com/rss/journal/{slug}"
+    RSS = "https://www.mdpi.com/rss/journal/{j}"
 
     def fetch(self):
-        for slug in self.JOURNALS:
-            # ----- 1) JSON Special-Issue endpoint -----
-            r = _get(self.JSON_API.format(slug=slug))
+        for j in self.JOURNALS:
+            # ① JSON endpoint (includes all statuses)
+            r = _get(self.JSON_API.format(j=j))
             if r:
-    try:
-        for it in r.json().get("specialIssues", []):
-            ...
-        continue
-    except (ValueError, KeyError):
-        self._warn(f"{j} bad JSON; fallback to RSS")
-            # ----- 2) RSS fallback (过滤 “special issue”) -----
-            feed = feedparser.parse(self.RSS.format(slug=slug))
+                try:
+                    for it in r.json().get("specialIssues", []):
+                        yield CFP(
+                            provider=self.provider,
+                            journal=j.capitalize(),
+                            title=it["title"],
+                            description=it["description"][:200],
+                            posted=None,
+                            deadline=_parse_date(it.get("deadline")),
+                            link=it["url"],
+                        )
+                    continue  # JSON succeeded
+                except Exception:
+                    self._warn(f"{j} JSON decode error; fallback to RSS")
+
+            # ② RSS fallback: keep entries mentioning "Special Issue"
+            feed = feedparser.parse(self.RSS.format(j=j))
             for e in feed.entries:
                 if "special issue" in (e.title + e.summary).lower():
                     yield CFP(
                         provider=self.provider,
-                        journal=slug.capitalize(),
+                        journal=j.capitalize(),
                         title=e.title,
                         description=e.summary[:200],
                         posted=None,
                         deadline=_parse_date(e.summary),
                         link=e.link,
                     )
-
 
 # Register all scrapers
 SCRAPERS = {
@@ -239,79 +245,4 @@ def crawl(providers: List[str], sjr: bool = False) -> List[CFP]:
         _log(f"{name}: {len(items)} items")
         for c in items:
             if sjr:
-                c.sjr = _sjr_lookup(c.journal)
-            results.append(c)
-    return results
-
-###############################################################################
-# CLI exporter                                                               #
-###############################################################################
-
-def main_cli():
-    ap = argparse.ArgumentParser(description="CFP crawler → JSON exporter")
-    ap.add_argument("--export-json", required=True, help="output JSON path")
-    ap.add_argument("--providers", nargs="*", default=list(SCRAPERS.keys()))
-    ap.add_argument("--sjr", action="store_true", help="lookup SJR (slow)")
-    args = ap.parse_args()
-
-    data = [c.to_dict() for c in crawl(args.providers, args.sjr)]
-    with open(args.export_json, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"✅ Exported {len(data)} CFP entries → {args.export_json}")
-
-###############################################################################
-# Streamlit dashboard                                                        #
-###############################################################################
-
-def run_dashboard():
-    """Streamlit UI entry point."""
-    st.set_page_config(page_title="CFP Dashboard", layout="wide")
-    st.title("📢 Call-for-Papers Dashboard")
-
-    # ───── Sidebar ──────────────────────────────────────────────────────────
-    remote_default = os.getenv("REMOTE_JSON_URL", "")
-    with st.sidebar:
-        st.header("Data source")
-        use_remote = st.toggle(
-            "🌐 Use remote data.json",
-            value=bool(remote_default),
-            help="Download pre-generated JSON instead of live crawling",
-        )
-        remote_url = st.text_input("Remote JSON URL", value=remote_default)
-        refresh = st.button("🔄 Live crawl now")
-
-    # ───── Load data ───────────────────────────────────────────────────────
-    if use_remote and remote_url:
-        try:
-            df = pd.read_json(remote_url)
-        except Exception as e:
-            st.error(f"Failed to load remote JSON: {e}")
-            df = pd.DataFrame()
-    else:
-        if refresh or "cfp_data" not in st.session_state:
-            with st.spinner("Crawling Elsevier / Wiley / MDPI …"):
-                st.session_state["cfp_data"] = [
-                    c.to_dict() for c in crawl(list(SCRAPERS.keys()))
-                ]
-        df = pd.DataFrame(st.session_state["cfp_data"])
-
-    # ───── Display ────────────────────────────────────────────────────────
-    if df.empty:
-        st.warning("No call-for-papers entries found.")
-        return
-
-    st.subheader(f"Results: {len(df)} CFPs")
-    st.dataframe(df, height=560)
-
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("💾 Download CSV", data=csv, file_name="cfp_results.csv", mime="text/csv")
-
-###############################################################################
-# Entry point                                                                #
-###############################################################################
-
-if __name__ == "__main__":
-    if IS_DASHBOARD:
-        run_dashboard()
-    else:
-        main_cli()
+                c.sjr = _sjr_lookup
