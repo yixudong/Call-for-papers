@@ -188,43 +188,46 @@ class Wileyscraper(BaseScraper):
 ###############################################################################
 class MDPIScraper(BaseScraper):
     provider = "MDPI"
-    JOURNALS = ["mathematics", "ecologies", "IJERPH", "materials", "IJFS", "sensors", "risks", "molecules", "geometry", "plants", "cells"]  # extend as needed
-    JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&status=open&limit=200"
-    RSS = "https://www.mdpi.com/rss/journal/{j}"
+    JOURNALS = [
+        "mathematics", "ecologies", "ijerph", "materials", "ijfs",
+        "sensors", "risks", "molecules", "geometry", "plants", "cells"
+    ]
+    JSON_API = "https://www.mdpi.com/journal/{slug}?format=cfp&status=open&limit=200"
+    RSS = "https://www.mdpi.com/rss/journal/{slug}"
 
     def fetch(self):
-        for j in self.JOURNALS:
-            # ① try JSON special‑issue endpoint (returns only CFPs)
-            r = _get(self.JSON_API.format(j=j))
+        for slug in self.JOURNALS:
+            # ----- 1) JSON Special-Issue endpoint -----
+            r = _get(self.JSON_API.format(slug=slug))
             if r and r.headers.get("Content-Type", "").startswith("application/json"):
                 try:
                     for it in r.json().get("specialIssues", []):
                         yield CFP(
                             provider=self.provider,
-                            journal=j.capitalize(),
+                            journal=slug.capitalize(),       # 展示时再首字母大写
                             title=it["title"],
                             description=it["description"][:200],
                             posted=None,
                             deadline=_parse_date(it.get("deadline")),
                             link=it["url"],
                         )
-                    continue  # JSON succeeded → skip RSS
+                    continue
                 except (ValueError, KeyError):
-                    self._warn(f"{j} bad JSON structure")
-
-            # ② fallback: RSS entries containing "Special Issue"
-            feed = feedparser.parse(self.RSS.format(j=j))
+                    self._warn(f"{slug} bad JSON")
+            # ----- 2) RSS fallback (过滤 “special issue”) -----
+            feed = feedparser.parse(self.RSS.format(slug=slug))
             for e in feed.entries:
                 if "special issue" in (e.title + e.summary).lower():
                     yield CFP(
                         provider=self.provider,
-                        journal=j.capitalize(),
+                        journal=slug.capitalize(),
                         title=e.title,
                         description=e.summary[:200],
                         posted=None,
                         deadline=_parse_date(e.summary),
                         link=e.link,
                     )
+
 
 # Register all scrapers
 SCRAPERS = {
