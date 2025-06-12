@@ -192,7 +192,7 @@ class MDPIScraper(BaseScraper):
         "mathematics", "ecologies", "ijerph", "materials", "ijfs",
         "sensors", "risks", "molecules", "geometry", "plants", "cells"
     ]
-    JSON_API = "https://www.mdpi.com/journal/{slug}?format=cfp&status=open&limit=200"
+    JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&limit=300"
     RSS = "https://www.mdpi.com/rss/journal/{slug}"
 
     def fetch(self):
