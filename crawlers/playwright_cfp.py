@@ -16,7 +16,8 @@ Playwright crawler for multiple CFP sites.
 import asyncio, json, yaml, pathlib
 from playwright.async_api import async_playwright
 
-CFG = yaml.safe_load(open(pathlib.Path(__file__).with_name("cfg.yaml")))
+cfg_path = pathlib.Path(__file__).with_name("cfg.yaml")
+CFG = yaml.safe_load(open(cfg_path, encoding="utf-8"))
 
 async def scrape(site, pw):
     browser = await pw.chromium.launch(headless=True, args=["--no-sandbox"])
