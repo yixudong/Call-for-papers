@@ -80,20 +80,34 @@ def _log(msg: str):
 
 
 def _get(url: str) -> Optional[requests.Response]:
-    """HTTP GET with retry/SSL fallback"""
+    """HTTP GET with retry/SSL fallback + debug log"""
     time.sleep(_REQUEST_DELAY)
     try:
-        r = _SESSION.get(url, timeout=20, headers={"User-Agent": "CFPBot/1.1"})
+        r = _SESSION.get(
+            url,
+            timeout=20,
+            headers={
+                # 伪装成正常浏览器，减少 403 / 503
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/124.0 Safari/537.36 CFPBot",
+                "Accept": "application/json, text/plain,*/*",
+            },
+        )
+        _log(f"GET {url[:70]}… → {r.status_code}")
         r.raise_for_status()
         return r
     except SSLError:
+        # 一次性关闭 SSL 验证再试
         try:
             r = _SESSION.get(url, timeout=20, verify=False)
+            _log(f"GET {url[:70]}… (no-SSL) → {r.status_code}")
             r.raise_for_status()
             return r
         except Exception:
             return None
-    except RequestException:
+    except RequestException as e:
+        _log(f"GET {url[:70]}… failed: {e}")
         return None
 
 
