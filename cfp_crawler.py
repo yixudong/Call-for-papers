@@ -188,31 +188,43 @@ class Wileyscraper(BaseScraper):
 ###############################################################################
 class MDPIScraper(BaseScraper):
     provider = "MDPI"
-    JOURNALS = ["foods", "nutrients", "metabolites"]  # extend if needed
-    FEED = "https://www.mdpi.com/rss/journal/{j}"
+    JOURNALS = ["foods", "nutrients", "metabolites"]   # ← 需要可自行扩充
+    JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&status=open&limit=200"
+    RSS = "https://www.mdpi.com/rss/journal/{j}"
 
     def fetch(self):
         for j in self.JOURNALS:
-            feed = feedparser.parse(self.FEED.format(j=j))
-            if not feed.entries:
-                self._warn(f"{j} RSS empty")
-                continue
-            for e in feed.entries:
-                yield CFP(
-                    provider=self.provider,
-                    journal=j.capitalize(),
-                    title=e.title,
-                    description=e.summary[:200],
-                    posted=None,
-                    deadline=_parse_date(e.summary),
-                    link=e.link,
-                )
+            # ① 尝试官方 JSON（更准确，只含征稿）
+            r = _get(self.JSON_API.format(j=j))
+            if r and r.headers.get("Content-Type", "").startswith("application/json"):
+                try:
+                    for it in r.json().get("specialIssues", []):
+                        yield CFP(
+                            provider=self.provider,
+                            journal=j.capitalize(),
+                            title=it["title"],
+                            description=it["description"][:200],
+                            posted=None,
+                            deadline=_parse_date(it.get("deadline")),
+                            link=it["url"],
+                        )
+                    continue    # JSON 成功 → 不走 RSS
+                except (ValueError, KeyError):
+                    self._warn(f"{j} bad JSON structure")
 
-SCRAPERS = {
-    "Elsevier": ElsevierScraper(),
-    "Wiley": Wileyscraper(),
-    "MDPI": MDPIScraper(),
-}
+            # ② 回退：RSS 中挑标题或摘要里含 “Special Issue”
+            feed = feedparser.parse(self.RSS.format(j=j))
+            for e in feed.entries:
+                if "special issue" in (e.title + e.summary).lower():
+                    yield CFP(
+                        provider=self.provider,
+                        journal=j.capitalize(),
+                        title=e.title,
+                        description=e.summary[:200],
+                        posted=None,
+                        deadline=_parse_date(e.summary),
+                        link=e.link,
+                    )
 
 ###############################################################################
 # Core crawl                                                                 #
@@ -252,7 +264,7 @@ def main_cli():
 def run_dashboard():
     """Streamlit UI entry point."""
     st.set_page_config(page_title="CFP Dashboard", layout="wide")
-    st.title("📢 Call‑for‑Papers Dashboard")
+    st.title("📢 Call-for-Papers Dashboard")
 
     # ───── Sidebar ──────────────────────────────────────────────────────────
     remote_default = os.getenv("REMOTE_JSON_URL", "")
@@ -261,7 +273,7 @@ def run_dashboard():
         use_remote = st.toggle(
             "🌐 Use remote data.json",
             value=bool(remote_default),
-            help="Download pre‑generated JSON instead of live crawling",
+            help="Download pre-generated JSON instead of live crawling",
         )
         remote_url = st.text_input("Remote JSON URL", value=remote_default)
         refresh = st.button("🔄 Live crawl now")
@@ -283,7 +295,7 @@ def run_dashboard():
 
     # ───── Display ────────────────────────────────────────────────────────
     if df.empty:
-        st.warning("No call‑for‑papers entries found.")
+        st.warning("No call-for-papers entries found.")
         return
 
     st.subheader(f"Results: {len(df)} CFPs")
