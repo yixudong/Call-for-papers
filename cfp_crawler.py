@@ -1,4 +1,4 @@
-# === Call‑for‑Papers Crawler & Streamlit Dashboard (2025‑06‑12) ===
+# === Call‑for‑Papers Crawler & Streamlit Dashboard (stable v1 • 2025‑06‑12) ===
 """
 Single‑file utility with two modes:
 
@@ -256,17 +256,4 @@ def run_dashboard():
     remote_default = os.getenv("REMOTE_JSON_URL", "")
     with st.sidebar:
         st.header("Data source")
-        use_remote = st.toggle("🌐 Use remote data.json", value=bool(remote_default))
-        remote_url = st.text_input("Remote JSON URL", value=remote_default)
-        refresh = st.button("🔄 Live crawl now")
-
-    if use_remote and remote_url:
-        try:
-            df = pd.read_json(remote_url)
-        except Exception as e:
-            st.error(f"Failed to fetch remote JSON: {e}")
-            df = pd.DataFrame()
-    else:
-        if refresh or "cfp_data" not in st.session_state:
-            with st.spinner("Crawling …"):
-                st.session_state["cfp_data"] = [c.to_dict() for c in crawl(list
+        use_remote = st.toggle("🌐 Use remote data.json", value=bool
