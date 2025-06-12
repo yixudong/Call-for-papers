@@ -119,11 +119,14 @@ SCRAPERS={"Elsevier":ElsevierScraper(),"Wiley":Wileyscraper(),"MDPI":MDPIScraper
 # Core crawl
 ###############################################################################
 
-def crawl(selected:List[str],with_sjr:bool=True)->List[CFP]:
-    out:List[CFP]=[]
+def crawl(selected: List[str], with_sjr: bool = True) -> List[CFP]:
+    out: List[CFP] = []
     for name in selected:
-        for cfp in SCRAPERS[name].fetch():
-            if with_sjr: cfp.sjr=_sjr_lookup(cfp.journal)
+        items = list(SCRAPERS[name].fetch())
+        print(f"{name}: {len(items)} items")          # <-- 新增
+        for cfp in items:
+            if with_sjr:
+                cfp.sjr = _sjr_lookup(cfp.journal)
             out.append(cfp)
     return out
 
