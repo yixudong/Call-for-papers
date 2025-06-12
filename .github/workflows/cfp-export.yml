@@ -1,19 +1,24 @@
 name: Export CFP JSON
 on:
-  schedule:            # 每 6 小时更新一次
-    - cron:  '0 */6 * * *'
-  workflow_dispatch:   # 允许手动触发
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: pip install feedparser requests
-      - run: python cfp_crawler.py --export-json data.json   # 文件若改名记得同步
+        with: {python-version: '3.11'}
+
+      - name: Install deps
+        run: pip install pandas feedparser requests
+
+      - name: Generate data.json
+        run: python cfp_crawler.py --export-json data.json
+
       - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: 'chore(data): update CFP JSON'
+        with: {commit_message: 'chore(data): update CFP JSON'}
+
