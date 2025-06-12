@@ -188,13 +188,13 @@ class Wileyscraper(BaseScraper):
 ###############################################################################
 class MDPIScraper(BaseScraper):
     provider = "MDPI"
-    JOURNALS = ["foods", "nutrients", "metabolites"]   # ← 需要可自行扩充
+    JOURNALS = ["foods", "nutrients", "metabolites"]  # extend as needed
     JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&status=open&limit=200"
     RSS = "https://www.mdpi.com/rss/journal/{j}"
 
     def fetch(self):
         for j in self.JOURNALS:
-            # ① 尝试官方 JSON（更准确，只含征稿）
+            # ① try JSON API (only CFPs)
             r = _get(self.JSON_API.format(j=j))
             if r and r.headers.get("Content-Type", "").startswith("application/json"):
                 try:
@@ -202,6 +202,29 @@ class MDPIScraper(BaseScraper):
                         yield CFP(
                             provider=self.provider,
                             journal=j.capitalize(),
+                            title=it["title"],
+                            description=it["description"][:200],
+                            posted=None,
+                            deadline=_parse_date(it.get("deadline")),
+                            link=it["url"],
+                        )
+                    continue  # success → skip RSS fallback
+                except (ValueError, KeyError):
+                    self._warn(f"{j} bad JSON structure")
+
+            # ② fallback RSS (filter "Special Issue")
+            feed = feedparser.parse(self.RSS.format(j=j))
+            for e in feed.entries:
+                if "special issue" in (e.title + e.summary).lower():
+                    yield CFP(
+                        provider=self.provider,
+                        journal=j.capitalize(),
+                        title=e.title,
+                        description=e.summary[:200],
+                        posted=None,
+                        deadline=_parse_date(e.summary),
+                        link=e.link,
+                    ),
                             title=it["title"],
                             description=it["description"][:200],
                             posted=None,
@@ -225,6 +248,17 @@ class MDPIScraper(BaseScraper):
                         deadline=_parse_date(e.summary),
                         link=e.link,
                     )
+
+###############################################################################
+# Core crawl                                                                 #
+###############################################################################
+
+# Register all scrapers
+SCRAPERS = {
+    "Elsevier": ElsevierScraper(),
+    "Wiley":    Wileyscraper(),
+    "MDPI":     MDPIScraper(),
+}
 
 ###############################################################################
 # Core crawl                                                                 #
