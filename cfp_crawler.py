@@ -70,7 +70,17 @@ def _sjr_lookup(journal:str)->Optional[float]:
 ###############################################################################
 # Scrapers
 ###############################################################################
-class BaseScraper: provider:str
+class BaseScraper:
+    provider: str
+
+    def fetch(self) -> Iterable[CFP]:
+        raise NotImplementedError
+
+    def _warn(self, msg: str):
+        if IS_DASHBOARD:
+            st.warning(f"{self.provider}: {msg} — skipped.")
+        else:
+            print(f"[WARN] {self.provider}: {msg}")
     def fetch(self)->Iterable[CFP]: raise NotImplementedError
     def _warn(self,msg):
         if IS_DASHBOARD: st.warning(f"{self.provider}: {msg} — skipped.")
@@ -155,4 +165,5 @@ def run_dashboard():
 if __name__=='__main__':
     if IS_DASHBOARD: run_dashboard()
     else: main_cli()
+
 
