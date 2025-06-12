@@ -193,7 +193,7 @@ class MDPIScraper(BaseScraper):
     ]
 
     # MDPI’s hidden JSON.  No `status=open` → returns both current & upcoming CFPs
-    JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&limit=3000"
+    JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&limit=300"
     # Generic article RSS (used as fallback)
     RSS = "https://www.mdpi.com/rss/journal/{j}"
 
@@ -245,10 +245,77 @@ SCRAPERS = {
 ###############################################################################
 
 def crawl(providers: List[str], sjr: bool = False) -> List[CFP]:
+    """Iterate scrapers, optionally enriching with SJR."""
     results: List[CFP] = []
     for name in providers:
         items = list(SCRAPERS[name].fetch())
         _log(f"{name}: {len(items)} items")
         for c in items:
             if sjr:
-                c.sjr = _sjr_lookup
+                c.sjr = _sjr_lookup(c.journal)
+            results.append(c)
+    return results
+
+###############################################################################
+# CLI exporter                                                               #
+###############################################################################
+
+def main_cli():
+    ap = argparse.ArgumentParser(description="CFP crawler → JSON exporter")
+    ap.add_argument("--export-json", required=True, help="output JSON file path")
+    ap.add_argument("--providers", nargs="*", default=list(SCRAPERS.keys()))
+    ap.add_argument("--sjr", action="store_true", help="lookup Scimago SJR (slow)")
+    args = ap.parse_args()
+
+    data = [c.to_dict() for c in crawl(args.providers, args.sjr)]
+    with open(args.export_json, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"✅ Exported {len(data)} CFP entries → {args.export_json}")
+
+###############################################################################
+# Streamlit dashboard                                                        #
+###############################################################################
+
+def run_dashboard():
+    st.set_page_config(page_title="CFP Dashboard", layout="wide")
+    st.title("📢 Call‑for‑Papers Dashboard")
+
+    remote_default = os.getenv("REMOTE_JSON_URL", "")
+
+    with st.sidebar:
+        st.header("Data source")
+        use_remote = st.toggle("🌐 Use remote data.json", value=bool(remote_default))
+        remote_url = st.text_input("Remote JSON URL", value=remote_default)
+        refresh = st.button("🔄 Live crawl now")
+
+    if use_remote and remote_url:
+        try:
+            df = pd.read_json(remote_url)
+        except Exception as e:
+            st.error(f"Failed to load remote JSON: {e}")
+            df = pd.DataFrame()
+    else:
+        if refresh or "cfp_data" not in st.session_state:
+            with st.spinner("Crawling …"):
+                st.session_state["cfp_data"] = [c.to_dict() for c in crawl(list(SCRAPERS.keys()))]
+        df = pd.DataFrame(st.session_state["cfp_data"])
+
+    if df.empty:
+        st.warning("No call‑for‑papers entries found.")
+        return
+
+    st.subheader(f"Results: {len(df)} CFPs")
+    st.dataframe(df, height=560)
+
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button("💾 Download CSV", data=csv, file_name="cfp_results.csv", mime="text/csv")
+
+###############################################################################
+# Entry point                                                                #
+###############################################################################
+
+if __name__ == "__main__":
+    if IS_DASHBOARD:
+        run_dashboard()
+    else:
+        main_cli()
