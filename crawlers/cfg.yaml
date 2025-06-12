@@ -1,0 +1,29 @@
+# Elsevier: ScienceDirect CFP 聚合页（需要 JS 渲染）
+- name: Elsevier
+  url:  https://www.sciencedirect.com/browse/calls-for-papers
+  list_selector: "article"
+  title_selector: "h3"
+  journal_selector: "a[href*='/journal/']"
+  link_selector: "a[href*='call-for-papers']"
+  deadline_selector: "time"
+  outfile: elsevier.json
+
+# MDPI：Portal 特别征稿聚合页（也用 React）
+- name: MDPI
+  url: https://www.mdpi.com/calls
+  list_selector: "div.call-item"
+  title_selector: "h3"
+  journal_selector: "span.journal-title"
+  link_selector: "a.call-title"
+  deadline_selector: "span.deadline"
+  outfile: mdpi.json
+
+# Springer Nature “Guest Edited Collections”
+- name: Springer
+  url: https://link.springer.com/calls-for-papers
+  list_selector: "li.c-list__item"
+  title_selector: "h3"
+  journal_selector: "p.c-meta__publisher"
+  link_selector: "a.c-card__link"
+  deadline_selector: "time"
+  outfile: springer.json
