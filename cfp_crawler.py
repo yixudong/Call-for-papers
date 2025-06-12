@@ -250,10 +250,54 @@ def main_cli():
 ###############################################################################
 
 def run_dashboard():
+    """Streamlit UI entry point."""
     st.set_page_config(page_title="CFP Dashboard", layout="wide")
     st.title("📢 Call‑for‑Papers Dashboard")
 
+    # ───── Sidebar ──────────────────────────────────────────────────────────
     remote_default = os.getenv("REMOTE_JSON_URL", "")
     with st.sidebar:
         st.header("Data source")
-        use_remote = st.toggle("🌐 Use remote data.json", value=bool
+        use_remote = st.toggle(
+            "🌐 Use remote data.json",
+            value=bool(remote_default),
+            help="Download pre‑generated JSON instead of live crawling",
+        )
+        remote_url = st.text_input("Remote JSON URL", value=remote_default)
+        refresh = st.button("🔄 Live crawl now")
+
+    # ───── Load data ───────────────────────────────────────────────────────
+    if use_remote and remote_url:
+        try:
+            df = pd.read_json(remote_url)
+        except Exception as e:
+            st.error(f"Failed to load remote JSON: {e}")
+            df = pd.DataFrame()
+    else:
+        if refresh or "cfp_data" not in st.session_state:
+            with st.spinner("Crawling Elsevier / Wiley / MDPI …"):
+                st.session_state["cfp_data"] = [
+                    c.to_dict() for c in crawl(list(SCRAPERS.keys()))
+                ]
+        df = pd.DataFrame(st.session_state["cfp_data"])
+
+    # ───── Display ────────────────────────────────────────────────────────
+    if df.empty:
+        st.warning("No call‑for‑papers entries found.")
+        return
+
+    st.subheader(f"Results: {len(df)} CFPs")
+    st.dataframe(df, height=560)
+
+    csv = df.to_csv(index=False).encode("utf-8")
+    st.download_button("💾 Download CSV", data=csv, file_name="cfp_results.csv", mime="text/csv")
+
+###############################################################################
+# Entry point                                                                #
+###############################################################################
+
+if __name__ == "__main__":
+    if IS_DASHBOARD:
+        run_dashboard()
+    else:
+        main_cli()
