@@ -187,36 +187,42 @@ class Wileyscraper(BaseScraper):
 class MDPIScraper(BaseScraper):
     provider = "MDPI"
     JOURNALS = [
+        # use lowercase slugs shown in MDPI URLs
         "mathematics", "ecologies", "ijerph", "materials", "ijfs",
-        "sensors", "risks", "molecules", "geometry", "plants", "cells"
-    ]  # slugs (lowercase)
-    JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&limit=300"
+        "sensors", "risks", "molecules", "geometry", "plants", "cells",
+    ]
+
+    # MDPI’s hidden JSON.  No `status=open` → returns both current & upcoming CFPs
+    JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&limit=3000"
+    # Generic article RSS (used as fallback)
     RSS = "https://www.mdpi.com/rss/journal/{j}"
 
     def fetch(self):
         for j in self.JOURNALS:
-            # ① JSON endpoint (includes all statuses)
+            # ◼︎ 1) Try official Special‑Issue JSON
             r = _get(self.JSON_API.format(j=j))
             if r:
                 try:
-                    for it in r.json().get("specialIssues", []):
-                        yield CFP(
-                            provider=self.provider,
-                            journal=j.capitalize(),
-                            title=it["title"],
-                            description=it["description"][:200],
-                            posted=None,
-                            deadline=_parse_date(it.get("deadline")),
-                            link=it["url"],
-                        )
-                    continue  # JSON succeeded
+                    data = r.json().get("specialIssues", [])
+                    if data:  # got hits ➜ yield & continue
+                        for it in data:
+                            yield CFP(
+                                provider=self.provider,
+                                journal=j.capitalize(),
+                                title=it.get("title", "Untitled"),
+                                description=it.get("description", "")[:200],
+                                posted=None,
+                                deadline=_parse_date(it.get("deadline")),
+                                link=it.get("url", ""),
+                            )
+                        continue  # skip RSS fallback
                 except Exception:
-                    self._warn(f"{j} JSON decode error; fallback to RSS")
+                    self._warn(f"{j} JSON decode error → fallback RSS")
 
-            # ② RSS fallback: keep entries mentioning "Special Issue"
+            # ◼︎ 2) Fallback RSS — keep items whose link looks like an SI
             feed = feedparser.parse(self.RSS.format(j=j))
             for e in feed.entries:
-                if "special issue" in (e.title + e.summary).lower():
+                if "/special_issues/" in e.link or "/special-issue" in e.link:
                     yield CFP(
                         provider=self.provider,
                         journal=j.capitalize(),
