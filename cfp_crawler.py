@@ -188,7 +188,7 @@ class Wileyscraper(BaseScraper):
 ###############################################################################
 class MDPIScraper(BaseScraper):
     provider = "MDPI"
-    JOURNALS = ["foods", "nutrients", "metabolites"]  # extend as needed
+    JOURNALS = ["Mathematics", "Ecologies", "IJERPH", "Materials", "IJFS", "Sensors", "Risks", "Molecules", "Geometry", "Plants", "Cells"]  # extend as needed
     JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&status=open&limit=200"
     RSS = "https://www.mdpi.com/rss/journal/{j}"
 
