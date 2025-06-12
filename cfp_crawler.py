@@ -80,34 +80,20 @@ def _log(msg: str):
 
 
 def _get(url: str) -> Optional[requests.Response]:
-    """HTTP GET with retry/SSL fallback + debug log"""
+    """HTTP GET with retry/SSL fallback"""
     time.sleep(_REQUEST_DELAY)
     try:
-        r = _SESSION.get(
-            url,
-            timeout=20,
-            headers={
-                # 伪装成正常浏览器，减少 403 / 503
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/124.0 Safari/537.36 CFPBot",
-                "Accept": "application/json, text/plain,*/*",
-            },
-        )
-        _log(f"GET {url[:70]}… → {r.status_code}")
+        r = _SESSION.get(url, timeout=20, headers={"User-Agent": "CFPBot/1.1"})
         r.raise_for_status()
         return r
     except SSLError:
-        # 一次性关闭 SSL 验证再试
         try:
             r = _SESSION.get(url, timeout=20, verify=False)
-            _log(f"GET {url[:70]}… (no-SSL) → {r.status_code}")
             r.raise_for_status()
             return r
         except Exception:
             return None
-    except RequestException as e:
-        _log(f"GET {url[:70]}… failed: {e}")
+    except RequestException:
         return None
 
 
@@ -147,8 +133,32 @@ class BaseScraper:
 # Elsevier – JSON hits                                                        #
 ###############################################################################
 class ElsevierScraper(BaseScraper):
+    """Fallback to Elsevier global RSS (JSON API blocked by Cloudflare)."""
     provider = "Elsevier"
-    FEED = "https://api.journals.elsevier.com/special-issues?limit=100"
+    FEED = "https://www.journals.elsevier.com/rss/special-issues"
+
+    def fetch(self):
+        feed = feedparser.parse(self.FEED)
+        if not feed.entries:
+            self._warn("rss empty")
+            return
+        for e in feed.entries:
+            yield CFP(
+                provider=self.provider,
+                journal=e.get("tags", [{}])[0].get("term", "Elsevier Journal"),
+                title=e.title,
+                description=e.summary[:200],
+                posted=None,
+                deadline=_parse_date(e.summary),
+                link=e.link,
+            )
+
+###############################################################################
+# Wiley – WP‑JSON v2                                                         #
+###############################################################################
+class Wileyscraper(BaseScraper):
+    provider = "Wiley"
+    FEED = "https://calls.wiley.com/wp-json/wp/v2/calls?per_page=100"
 
     def fetch(self):
         r = _get(self.FEED)
@@ -156,23 +166,23 @@ class ElsevierScraper(BaseScraper):
             self._warn("network error")
             return
         try:
-            for it in r.json().get("hits", []):
+            for it in r.json():
+                acf = it.get("acf", {})
+                if acf.get("status") != "open":
+                    continue
                 yield CFP(
                     provider=self.provider,
-                    journal=it.get("journalTitle", "Elsevier Journal"),
-                    title=it.get("title", "Untitled"),
-                    description=it.get("description", "")[:200],
+                    journal=acf.get("journal", "Wiley Journal"),
+                    title=it.get("title", {}).get("rendered", "Untitled"),
+                    description=acf.get("description", "")[:200],
                     posted=None,
-                    deadline=_parse_date(it.get("submissionDeadline")),
-                    link=it.get("url", ""),
+                    deadline=_parse_date(acf.get("deadline")),
+                    link=acf.get("url", it.get("link", "")),
                 )
-        except ValueError:
-            self._warn("bad JSON structure")
+        except Exception:
+            self._warn("bad JSON")
 
-###############################################################################
-# Wiley – JSON `calls` array                                                  #
-###############################################################################
-class Wileyscraper(BaseScraper):
+###############################################################################(BaseScraper):
     provider = "Wiley"
     FEED = "https://wol-prod-cfp-files.s3.amazonaws.com/v2/calls.json"
 
@@ -201,51 +211,28 @@ class Wileyscraper(BaseScraper):
 class MDPIScraper(BaseScraper):
     provider = "MDPI"
     JOURNALS = [
-        # use lowercase slugs shown in MDPI URLs
         "mathematics", "ecologies", "ijerph", "materials", "ijfs",
         "sensors", "risks", "molecules", "geometry", "plants", "cells",
     ]
 
-    # MDPI’s hidden JSON.  No `status=open` → returns both current & upcoming CFPs
-    JSON_API = "https://www.mdpi.com/journal/{j}?format=cfp&limit=300"
-    # Generic article RSS (used as fallback)
-    RSS = "https://www.mdpi.com/rss/journal/{j}"
+    RSS_SI = "https://www.mdpi.com/rss/journal/{j}/special_issue"  # only special issues
 
     def fetch(self):
         for j in self.JOURNALS:
-            # ◼︎ 1) Try official Special‑Issue JSON
-            r = _get(self.JSON_API.format(j=j))
-            if r:
-                try:
-                    data = r.json().get("specialIssues", [])
-                    if data:  # got hits ➜ yield & continue
-                        for it in data:
-                            yield CFP(
-                                provider=self.provider,
-                                journal=j.capitalize(),
-                                title=it.get("title", "Untitled"),
-                                description=it.get("description", "")[:200],
-                                posted=None,
-                                deadline=_parse_date(it.get("deadline")),
-                                link=it.get("url", ""),
-                            )
-                        continue  # skip RSS fallback
-                except Exception:
-                    self._warn(f"{j} JSON decode error → fallback RSS")
-
-            # ◼︎ 2) Fallback RSS — keep items whose link looks like an SI
-            feed = feedparser.parse(self.RSS.format(j=j))
+            feed = feedparser.parse(self.RSS_SI.format(j=j))
+            if not feed.entries:
+                self._warn(f"{j} rss empty")
+                continue
             for e in feed.entries:
-                if "/special_issues/" in e.link or "/special-issue" in e.link:
-                    yield CFP(
-                        provider=self.provider,
-                        journal=j.capitalize(),
-                        title=e.title,
-                        description=e.summary[:200],
-                        posted=None,
-                        deadline=_parse_date(e.summary),
-                        link=e.link,
-                    )
+                yield CFP(
+                    provider=self.provider,
+                    journal=j.capitalize(),
+                    title=e.title,
+                    description=e.summary[:200],
+                    posted=None,
+                    deadline=_parse_date(e.summary),
+                    link=e.link,
+                )
 
 # Register all scrapers
 SCRAPERS = {
